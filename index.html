@@ -228,7 +228,7 @@ const UV={era:0,tab:'map',only:false};
 /* ---------- 데이터 ---------- */
 async function boot(){
   const sp=fetch('data/study.json').then(r=>r.ok?r.json():null).catch(()=>null);
-  try{const c=await fetch('config.json');if(c.ok)CFG={...CFG,...await c.json()}}catch(e){}
+  try{const c=await fetch('config.json',{cache:'no-store'});if(c.ok)CFG={...CFG,...await c.json()}}catch(e){}
   try{const r=await fetch('data/questions.json');Q=await r.json()}catch(e){$app.innerHTML='<div class="wrap" style="padding:40px 16px">문항 데이터를 불러오지 못했어요. 새로고침해 주세요.</div>';return}
   Q.forEach(x=>BY[x.id]=x);
   ST=await sp;
