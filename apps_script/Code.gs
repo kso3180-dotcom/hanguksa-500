@@ -3,15 +3,33 @@
  * 사용법: 구글 시트 > 확장 프로그램 > Apps Script 에 이 코드를 붙여 넣고
  *        ① setup 실행 → ② 배포 > 새 배포 > 웹 앱 (실행: 나 / 액세스: 모든 사용자)
  *        ③ 나온 웹 앱 URL을 앱의 config.json "scriptUrl" 에 넣기
+ * script.google.com 에서 따로 만든 프로젝트여도 괜찮아요:
+ *        setup 을 실행하면 기록용 구글 시트를 새로 만들고, 실행 로그에 시트 주소를 알려 줘요.
  */
 const SH = { LOG: '제출기록', CODES: '학생코드', SUM: '학생별 요약', QS: '문항별 오답', PASTE: '결과코드 붙여넣기' };
 const LOG_HEAD = ['접수 시각', '기록 ID', '개인 코드', '이름(코드표)', '유형', '내용', '점수', '급수',
   '정답 수', '문항 수', '정답률', '걸린 시간(분)', '틀린 문항', '앱에서 푼 시각', '경로'];
-const MODE = { mock: '모의고사', era: '시대별', random: '랜덤10', timer: '타이머', wrong: '오답노트' };
+const MODE = { mock: '모의고사', era: '시대별', random: '랜덤10', timer: '타이머', wrong: '오답노트', concept: '개념 기출' };
+
+/* ---------- 기록 시트 찾기 ----------
+ * 시트에 붙은 스크립트면 그 시트를, 따로 만든 스크립트면 setup 때 만든 시트를 씀 */
+function book() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('SHEET_ID');
+  if (id) { try { return SpreadsheetApp.openById(id); } catch (e) {} }
+  const ss = SpreadsheetApp.getActive();
+  if (ss) props.setProperty('SHEET_ID', ss.getId());
+  return ss;
+}
 
 /* ---------- 최초 1회: 시트 만들기 ---------- */
 function setup() {
-  const ss = SpreadsheetApp.getActive();
+  let ss = book(), made = false;
+  if (!ss) {
+    ss = SpreadsheetApp.create('한능검 심화 기출 500 — 학생 기록');
+    PropertiesService.getScriptProperties().setProperty('SHEET_ID', ss.getId());
+    made = true;
+  }
   ss.setSpreadsheetTimeZone('Asia/Seoul');
   const mk = (name, head, widths) => {
     let sh = ss.getSheetByName(name);
@@ -30,8 +48,10 @@ function setup() {
   mk(SH.PASTE, ['결과 코드 (학생이 보낸 HK1-… 코드를 A열에 한 줄씩)', '처리 결과'], [520, 200]);
   const s1 = ss.getSheetByName('시트1') || ss.getSheetByName('Sheet1');
   if (s1 && s1.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(s1);
-  ss.setActiveSheet(ss.getSheetByName(SH.CODES));
-  SpreadsheetApp.getUi().alert('준비 완료!\n\n1) "학생코드" 시트에 개인 코드와 이름을 적어 주세요.\n2) 배포 > 새 배포 > 웹 앱으로 배포하세요.');
+  const msg = '준비 완료!\n\n1) "학생코드" 시트에 개인 코드와 이름을 적어 주세요.\n2) 배포 > 새 배포 > 웹 앱으로 배포하세요.';
+  console.log((made ? '기록용 시트를 새로 만들었어요: ' : '기록용 시트: ') + ss.getUrl());
+  console.log(msg);
+  try { ss.setActiveSheet(ss.getSheetByName(SH.CODES)); SpreadsheetApp.getUi().alert(msg); } catch (e) {}
 }
 
 function onOpen() {
@@ -40,7 +60,7 @@ function onOpen() {
     .addItem('결과 코드 반영', 'importPastedCodes')
     .addItem('처음 설정(setup)', 'setup')
     .addToUi();
-  try { refreshSummary(); } catch (e) {}
+  try { book(); refreshSummary(); } catch (e) {}
 }
 
 /* ---------- 웹 앱 ---------- */
@@ -65,7 +85,7 @@ function doPost(e) {
 
 function addRecord(r, via) {
   if (!r || !r.rid || !r.code) return { ok: false, error: 'bad record' };
-  const ss = SpreadsheetApp.getActive();
+  const ss = book();
   const sh = ss.getSheetByName(SH.LOG);
   if (sh.getLastRow() > 1) {
     const hit = sh.getRange(2, 2, sh.getLastRow() - 1, 1).createTextFinder(String(r.rid)).matchEntireCell(true).findNext();
@@ -84,7 +104,7 @@ function addRecord(r, via) {
 
 /* ---------- 학생이 결과 코드로 낸 경우 ---------- */
 function importPastedCodes() {
-  const ss = SpreadsheetApp.getActive();
+  const ss = book();
   const sh = ss.getSheetByName(SH.PASTE);
   const n = sh.getLastRow() - 1;
   if (n < 1) return;
@@ -104,12 +124,13 @@ function importPastedCodes() {
     sh.getRange(i + 2, 2).setValue(msg);
   });
   refreshSummary();
-  SpreadsheetApp.getActive().toast(added + '건 반영했어요.');
+  try { ss.toast(added + '건 반영했어요.'); } catch (e) {}
+  console.log(added + '건 반영했어요.');
 }
 
 /* ---------- 요약 시트 다시 만들기 ---------- */
 function refreshSummary() {
-  const ss = SpreadsheetApp.getActive();
+  const ss = book();
   const log = ss.getSheetByName(SH.LOG);
   if (!log || log.getLastRow() < 2) return;
   const rows = log.getRange(2, 1, log.getLastRow() - 1, LOG_HEAD.length).getValues();
@@ -142,7 +163,7 @@ function refreshSummary() {
 
 /* ---------- 도우미 ---------- */
 function codeTable() {
-  const sh = SpreadsheetApp.getActive().getSheetByName(SH.CODES);
+  const sh = book().getSheetByName(SH.CODES);
   const t = {};
   if (!sh || sh.getLastRow() < 2) return t;
   sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().forEach(r => {
